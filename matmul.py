@@ -29,28 +29,13 @@ def my_assertion(actual, desired, min_rtol=1, max_rtol=12):
     print(f"Pass all atol tests")
 
 
-def linear(input:te.Tensor, weight:te.Tensor):
-    B, M, K = input.shape
-    B, N, K = weight.shape
-
-    k = te.reduce_axis((0, K), name="k")
-    
-    output = te.compute(
-        (B, M, N),
-        lambda b, i, j: te.sum(
-            input[b, i, k] * weight[b, j, k]
-        , axis=k),
-        tag="matmul",
-    )
-    return output
-
 if __name__ == "__main__":
     B, M, K, N = 1, 20, 2, 20
     dev = tvm.cpu()
 
     input = te.placeholder((B, M, K), name="input")
     weight = te.placeholder((B, N, K), name="input")
-    out = linear(input, weight)
+    out = topi.nn.batch_matmul(input, weight)
     sch = te.create_schedule(out.op)
     tlinear = tvm.build(sch, [input, weight, out])
 
@@ -66,7 +51,19 @@ if __name__ == "__main__":
     
     tc = torch.matmul(ta, tb)
 
+    print("Compare TVM with PTH")
     my_assertion(c.numpy(), tc.numpy())
-    # Pass atol 1e-6
-    # Fail atol 1e-7
 
+    print("Compare TVM with Numpy")
+    na = a.numpy()
+    nb = b.numpy()
+
+    nc_slices = [
+        np.expand_dims(np.matmul(na[b], nb[b].T), axis=0)
+        for b in range(B)
+    ]
+    nc = np.concatenate(nc_slices, axis=1)
+    my_assertion(c.numpy(), nc)
+
+    print("Compare PyTorch with Numpy")
+    my_assertion(tc.numpy(), nc)
